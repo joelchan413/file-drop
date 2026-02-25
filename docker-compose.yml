@@ -1,0 +1,9 @@
+services:
+  file-drop:
+    build: .
+    container_name: file-drop
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./received_photos:/app/uploads
+    restart: unless-stopped

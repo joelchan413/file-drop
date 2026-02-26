@@ -9,6 +9,8 @@ A lightweight, self-hosted web app for quickly transferring photos from your pho
 - **Instant transfers** — photos arrive on your computer in seconds
 - **Multi-file upload** — select or drag multiple photos at once
 - **Real progress bars** — per-file percentage with thumbnail previews
+- **Instant access to uploads** — view, copy, or download uploaded photos from the app
+- **Built-in quick editor** — add text, boxes, freehand drawing, highlights, and crop before sharing
 - **Drag & drop** — works on desktop browsers too
 - **No accounts, no cloud** — everything stays on your local network
 - **Dark mode** — clean, mobile-optimized UI

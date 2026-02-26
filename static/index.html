@@ -191,6 +191,155 @@
       flex-direction: column;
       gap: 14px;
     }
+
+    /* ── Uploaded photos list ───────────────────────────── */
+    .uploads {
+      margin-top: 20px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+    .uploads-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .uploads-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .uploaded-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+    }
+    .uploaded-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .uploaded-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .uploaded-name {
+      font-size: 0.78rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .uploaded-size {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .uploaded-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .action-btn {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color .2s, background .2s;
+    }
+    .action-btn:hover {
+      border-color: var(--accent);
+      background: rgba(108,99,255,.1);
+    }
+    .uploads-empty {
+      font-size: 0.76rem;
+      color: var(--muted);
+      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+
+    /* ── Editor modal ───────────────────────────────────── */
+    .editor-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(15,15,19,.82);
+      z-index: 20;
+    }
+    .editor-modal.active {
+      display: flex;
+    }
+    .editor-card {
+      width: min(100%, 980px);
+      max-height: 92dvh;
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .editor-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .tool-btn.active {
+      border-color: var(--accent);
+      background: rgba(108,99,255,.16);
+    }
+    .editor-stage {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: auto;
+      max-height: 64dvh;
+      background: var(--bg);
+      display: flex;
+      justify-content: center;
+    }
+    .editor-canvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      touch-action: none;
+    }
+    .editor-footer {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .editor-file {
+      font-size: 0.74rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .editor-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -206,6 +355,38 @@
     </div>
 
     <div id="uploadQueue" class="upload-queue"></div>
+
+    <section class="uploads">
+      <div class="uploads-title">Uploaded photos</div>
+      <div id="uploadsList" class="uploads-list"></div>
+    </section>
+
+    <div id="editorModal" class="editor-modal" role="dialog" aria-modal="true" aria-label="Image editor">
+      <div class="editor-card">
+        <div class="editor-toolbar">
+          <button type="button" class="action-btn tool-btn active" data-tool="draw">Draw</button>
+          <button type="button" class="action-btn tool-btn" data-tool="highlight">Highlight</button>
+          <button type="button" class="action-btn tool-btn" data-tool="box">Box</button>
+          <button type="button" class="action-btn tool-btn" data-tool="text">Text</button>
+          <button type="button" class="action-btn tool-btn" data-tool="crop">Crop</button>
+          <button type="button" id="resetEditor" class="action-btn">Reset</button>
+        </div>
+
+        <div class="editor-stage">
+          <canvas id="editorCanvas" class="editor-canvas"></canvas>
+        </div>
+
+        <div class="editor-footer">
+          <div id="editorFilename" class="editor-file"></div>
+          <div class="editor-actions">
+            <button type="button" id="copyEditedBtn" class="action-btn">Copy</button>
+            <button type="button" id="downloadEditedBtn" class="action-btn">Download</button>
+            <button type="button" id="closeEditor" class="action-btn">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast"></div>
   </div>
 
@@ -213,7 +394,45 @@
     const dropZone   = document.getElementById('dropZone');
     const filePicker = document.getElementById('filePicker');
     const queue      = document.getElementById('uploadQueue');
+    const uploadsList = document.getElementById('uploadsList');
+    const editorModal = document.getElementById('editorModal');
+    const editorCanvas = document.getElementById('editorCanvas');
+    const editorFilename = document.getElementById('editorFilename');
+    const closeEditor = document.getElementById('closeEditor');
+    const copyEditedBtn = document.getElementById('copyEditedBtn');
+    const downloadEditedBtn = document.getElementById('downloadEditedBtn');
+    const resetEditor = document.getElementById('resetEditor');
+    const toolButtons = [...document.querySelectorAll('.tool-btn')];
     const toast      = document.getElementById('toast');
+
+    const editorCtx = editorCanvas.getContext('2d');
+    let selectedTool = 'draw';
+    let currentFile = null;
+    let baseImage = null;
+    let isPointerDown = false;
+    let startPoint = null;
+    let snapshot = null;
+    let undoStack = [];
+    let redoStack = [];
+    const MAX_UNDO_STEPS = 30;
+
+    loadUploads();
+
+    toolButtons.forEach(btn => {
+      btn.addEventListener('click', () => setTool(btn.dataset.tool));
+    });
+    closeEditor.addEventListener('click', closeEditorModal);
+    editorModal.addEventListener('click', ev => {
+      if (ev.target === editorModal) closeEditorModal();
+    });
+    resetEditor.addEventListener('click', resetEditorCanvas);
+    copyEditedBtn.addEventListener('click', copyEditedImage);
+    downloadEditedBtn.addEventListener('click', downloadEditedImage);
+    editorCanvas.addEventListener('pointerdown', onCanvasPointerDown);
+    editorCanvas.addEventListener('pointermove', onCanvasPointerMove);
+    editorCanvas.addEventListener('pointerup', onCanvasPointerUp);
+    editorCanvas.addEventListener('pointerleave', onCanvasPointerUp);
+    document.addEventListener('keydown', onEditorKeydown);
 
     /* ── Drag & drop visual cues ─────────────────────────── */
     ['dragenter','dragover'].forEach(e =>
@@ -310,8 +529,393 @@
       } else {
         showToast('error', `⚠️ ${done} uploaded, ${failed} failed.`);
       }
+      loadUploads();
       // Clear the progress rows after a short pause
       setTimeout(() => { queue.innerHTML = ''; }, 4000);
+    }
+
+    /* ── Uploaded photos list ───────────────────────────── */
+    async function loadUploads() {
+      try {
+        const res = await fetch('/uploads');
+        if (!res.ok) throw new Error('Failed to load uploads');
+        const data = await res.json();
+        renderUploads(data.files || []);
+      } catch {
+        renderUploads([]);
+      }
+    }
+
+    function renderUploads(files) {
+      uploadsList.innerHTML = '';
+      if (!files.length) {
+        const empty = document.createElement('div');
+        empty.className = 'uploads-empty';
+        empty.textContent = 'No uploaded photos yet.';
+        uploadsList.appendChild(empty);
+        return;
+      }
+
+      files.forEach(file => {
+        const row = document.createElement('div');
+        row.className = 'uploaded-item';
+
+        const img = document.createElement('img');
+        img.className = 'uploaded-thumb';
+        img.src = file.url;
+        img.alt = file.filename;
+
+        const meta = document.createElement('div');
+        meta.className = 'uploaded-meta';
+
+        const name = document.createElement('div');
+        name.className = 'uploaded-name';
+        name.textContent = file.filename;
+
+        const size = document.createElement('div');
+        size.className = 'uploaded-size';
+        size.textContent = formatBytes(file.size || 0);
+
+        meta.appendChild(name);
+        meta.appendChild(size);
+
+        const actions = document.createElement('div');
+        actions.className = 'uploaded-actions';
+
+        const copyButton = document.createElement('button');
+        copyButton.type = 'button';
+        copyButton.className = 'action-btn';
+        copyButton.textContent = 'Copy';
+        copyButton.addEventListener('click', () => copyUploadedImage(file));
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'action-btn';
+        editButton.textContent = 'Edit';
+        editButton.addEventListener('click', () => openEditor(file));
+
+        const downloadLink = document.createElement('a');
+        downloadLink.className = 'action-btn';
+        downloadLink.href = file.download_url;
+        downloadLink.download = file.filename;
+        downloadLink.textContent = 'Download';
+
+        actions.appendChild(editButton);
+        actions.appendChild(copyButton);
+        actions.appendChild(downloadLink);
+
+        row.appendChild(img);
+        row.appendChild(meta);
+        row.appendChild(actions);
+        uploadsList.appendChild(row);
+      });
+    }
+
+    async function copyUploadedImage(file) {
+      try {
+        const res = await fetch(file.url);
+        if (!res.ok) throw new Error('Failed to fetch image');
+        const blob = await res.blob();
+
+        if (window.ClipboardItem && navigator.clipboard?.write) {
+          await navigator.clipboard.write([
+            new ClipboardItem({ [blob.type || 'image/png']: blob })
+          ]);
+          showToast('success', `📋 Copied ${file.filename}`);
+          return;
+        }
+
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(location.origin + file.url);
+          showToast('success', `📋 Copied image URL for ${file.filename}`);
+          return;
+        }
+
+        throw new Error('Clipboard API unavailable');
+      } catch {
+        showToast('error', 'Copy failed. Try Download instead.');
+      }
+    }
+
+    async function openEditor(file) {
+      try {
+        const img = await loadImage(file.url);
+        currentFile = file;
+        baseImage = img;
+
+        editorCanvas.width = img.naturalWidth;
+        editorCanvas.height = img.naturalHeight;
+        editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+        editorCtx.drawImage(img, 0, 0);
+        undoStack = [];
+        redoStack = [];
+
+        editorFilename.textContent = file.filename;
+        setTool('draw');
+        editorModal.classList.add('active');
+      } catch {
+        showToast('error', 'Failed to open image editor.');
+      }
+    }
+
+    function closeEditorModal() {
+      editorModal.classList.remove('active');
+      isPointerDown = false;
+      startPoint = null;
+      snapshot = null;
+    }
+
+    function setTool(tool) {
+      selectedTool = tool;
+      toolButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tool === tool));
+    }
+
+    function resetEditorCanvas() {
+      if (!baseImage) return;
+      pushUndoState();
+      editorCanvas.width = baseImage.naturalWidth;
+      editorCanvas.height = baseImage.naturalHeight;
+      editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+      editorCtx.drawImage(baseImage, 0, 0);
+      showToast('success', 'Editor reset to original image.');
+    }
+
+    function getCanvasPoint(ev) {
+      const rect = editorCanvas.getBoundingClientRect();
+      const scaleX = editorCanvas.width / rect.width;
+      const scaleY = editorCanvas.height / rect.height;
+      return {
+        x: (ev.clientX - rect.left) * scaleX,
+        y: (ev.clientY - rect.top) * scaleY,
+      };
+    }
+
+    function onCanvasPointerDown(ev) {
+      if (!editorModal.classList.contains('active')) return;
+      const pt = getCanvasPoint(ev);
+
+      if (selectedTool === 'text') {
+        const input = prompt('Text to place on image:');
+        if (!input) return;
+        pushUndoState();
+        editorCtx.font = `${Math.max(16, Math.round(editorCanvas.width * 0.03))}px Inter, sans-serif`;
+        editorCtx.fillStyle = getThemeColor('--text');
+        editorCtx.strokeStyle = 'rgba(15,15,19,.8)';
+        editorCtx.lineWidth = 3;
+        editorCtx.strokeText(input, pt.x, pt.y);
+        editorCtx.fillText(input, pt.x, pt.y);
+        return;
+      }
+
+  pushUndoState();
+      isPointerDown = true;
+      startPoint = pt;
+      snapshot = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+
+      if (selectedTool === 'draw') {
+        editorCtx.beginPath();
+        editorCtx.moveTo(pt.x, pt.y);
+      }
+      editorCanvas.setPointerCapture(ev.pointerId);
+    }
+
+    function onCanvasPointerMove(ev) {
+      if (!isPointerDown || !startPoint) return;
+      const pt = getCanvasPoint(ev);
+
+      if (selectedTool === 'draw') {
+        editorCtx.strokeStyle = getThemeColor('--red');
+        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.005));
+        editorCtx.lineCap = 'round';
+        editorCtx.lineJoin = 'round';
+        editorCtx.lineTo(pt.x, pt.y);
+        editorCtx.stroke();
+        return;
+      }
+
+      editorCtx.putImageData(snapshot, 0, 0);
+
+      const rect = toRect(startPoint, pt);
+      if (selectedTool === 'box') {
+        editorCtx.strokeStyle = getThemeColor('--green');
+        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
+        editorCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      } else if (selectedTool === 'highlight') {
+        editorCtx.fillStyle = 'rgba(108,99,255,.28)';
+        editorCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      } else if (selectedTool === 'crop') {
+        editorCtx.strokeStyle = getThemeColor('--accent');
+        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
+        editorCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      }
+    }
+
+    function onCanvasPointerUp(ev) {
+      if (!isPointerDown || !startPoint) return;
+      const pt = getCanvasPoint(ev);
+
+      if (selectedTool === 'crop') {
+        const rect = toRect(startPoint, pt);
+        if (rect.w > 8 && rect.h > 8) {
+          const source = document.createElement('canvas');
+          source.width = editorCanvas.width;
+          source.height = editorCanvas.height;
+          source.getContext('2d').drawImage(editorCanvas, 0, 0);
+
+          editorCanvas.width = Math.round(rect.w);
+          editorCanvas.height = Math.round(rect.h);
+          editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+          editorCtx.drawImage(
+            source,
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            0,
+            0,
+            editorCanvas.width,
+            editorCanvas.height
+          );
+        } else {
+          editorCtx.putImageData(snapshot, 0, 0);
+        }
+      }
+
+      isPointerDown = false;
+      startPoint = null;
+      snapshot = null;
+      if (editorCanvas.hasPointerCapture(ev.pointerId)) {
+        editorCanvas.releasePointerCapture(ev.pointerId);
+      }
+    }
+
+    function toRect(a, b) {
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(a.x - b.x);
+      const h = Math.abs(a.y - b.y);
+      return { x, y, w, h };
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+    }
+
+    function onEditorKeydown(ev) {
+      if (!editorModal.classList.contains('active')) return;
+      const key = ev.key.toLowerCase();
+      if ((ev.ctrlKey || ev.metaKey) && key === 'z' && !ev.shiftKey) {
+        ev.preventDefault();
+        undoEditor();
+        return;
+      }
+      if ((ev.ctrlKey || ev.metaKey) && ((key === 'z' && ev.shiftKey) || key === 'y')) {
+        ev.preventDefault();
+        redoEditor();
+      }
+    }
+
+    function pushUndoState() {
+      if (!editorCanvas.width || !editorCanvas.height) return;
+      const imageData = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      undoStack.push({
+        width: editorCanvas.width,
+        height: editorCanvas.height,
+        imageData,
+      });
+      if (undoStack.length > MAX_UNDO_STEPS) {
+        undoStack.shift();
+      }
+      redoStack = [];
+    }
+
+    function undoEditor() {
+      const lastState = undoStack.pop();
+      if (!lastState) return;
+      pushRedoState();
+      editorCanvas.width = lastState.width;
+      editorCanvas.height = lastState.height;
+      editorCtx.putImageData(lastState.imageData, 0, 0);
+    }
+
+    function pushRedoState() {
+      const imageData = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      redoStack.push({
+        width: editorCanvas.width,
+        height: editorCanvas.height,
+        imageData,
+      });
+      if (redoStack.length > MAX_UNDO_STEPS) {
+        redoStack.shift();
+      }
+    }
+
+    function redoEditor() {
+      const nextState = redoStack.pop();
+      if (!nextState) return;
+      const currentState = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      undoStack.push({
+        width: editorCanvas.width,
+        height: editorCanvas.height,
+        imageData: currentState,
+      });
+      if (undoStack.length > MAX_UNDO_STEPS) {
+        undoStack.shift();
+      }
+      editorCanvas.width = nextState.width;
+      editorCanvas.height = nextState.height;
+      editorCtx.putImageData(nextState.imageData, 0, 0);
+    }
+
+    function getThemeColor(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function canvasToBlob(canvas) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error('Blob creation failed'));
+        }, 'image/png');
+      });
+    }
+
+    async function copyEditedImage() {
+      if (!editorModal.classList.contains('active')) return;
+      try {
+        const blob = await canvasToBlob(editorCanvas);
+        if (window.ClipboardItem && navigator.clipboard?.write) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          showToast('success', '📋 Copied edited image');
+          return;
+        }
+        throw new Error('Clipboard API unavailable');
+      } catch {
+        showToast('error', 'Copy failed. Use Download.');
+      }
+    }
+
+    async function downloadEditedImage() {
+      if (!editorModal.classList.contains('active')) return;
+      try {
+        const blob = await canvasToBlob(editorCanvas);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const baseName = currentFile?.filename?.replace(/\.[^/.]+$/, '') || 'edited-image';
+        a.href = url;
+        a.download = `${baseName}_edited.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+        showToast('error', 'Download failed.');
+      }
     }
 
     /* ── Toast helpers ───────────────────────────────────── */

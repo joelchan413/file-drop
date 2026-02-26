@@ -617,23 +617,19 @@
         if (!res.ok) throw new Error('Failed to fetch image');
         const blob = await res.blob();
 
-        if (window.ClipboardItem && navigator.clipboard?.write) {
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type || 'image/png']: blob })
-          ]);
+        if (await tryCopyImageBlob(blob)) {
           showToast('success', `📋 Copied ${file.filename}`);
           return;
         }
 
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(location.origin + file.url);
+        if (await tryCopyText(location.origin + file.url)) {
           showToast('success', `📋 Copied image URL for ${file.filename}`);
           return;
         }
 
         throw new Error('Clipboard API unavailable');
       } catch {
-        showToast('error', 'Copy failed. Try Download instead.');
+        showToast('error', 'Copy failed on this browser/context. Use Download.');
       }
     }
 
@@ -889,14 +885,20 @@
       if (!editorModal.classList.contains('active')) return;
       try {
         const blob = await canvasToBlob(editorCanvas);
-        if (window.ClipboardItem && navigator.clipboard?.write) {
-          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        if (await tryCopyImageBlob(blob)) {
           showToast('success', '📋 Copied edited image');
           return;
         }
+
+        const dataUrl = editorCanvas.toDataURL('image/png');
+        if (await tryCopyText(dataUrl)) {
+          showToast('success', '📋 Copied edited image data URL');
+          return;
+        }
+
         throw new Error('Clipboard API unavailable');
       } catch {
-        showToast('error', 'Copy failed. Use Download.');
+        showToast('error', 'Copy failed on this browser/context. Use Download.');
       }
     }
 
@@ -934,6 +936,50 @@
       if (b < 1024) return b + ' B';
       if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
       return (b / 1048576).toFixed(1) + ' MB';
+    }
+
+    async function tryCopyImageBlob(blob) {
+      try {
+        if (window.ClipboardItem && navigator.clipboard?.write) {
+          const type = blob.type || 'image/png';
+          await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    }
+
+    async function tryCopyText(text) {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch {
+        // fallback below
+      }
+      return legacyCopyText(text);
+    }
+
+    function legacyCopyText(text) {
+      try {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        area.style.left = '-9999px';
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        const ok = document.execCommand('copy');
+        area.remove();
+        return ok;
+      } catch {
+        return false;
+      }
     }
   </script>
 </body>

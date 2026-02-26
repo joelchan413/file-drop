@@ -306,6 +306,15 @@
       border-color: var(--accent);
       background: rgba(108,99,255,.16);
     }
+    .color-picker {
+      width: 34px;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      padding: 2px;
+      cursor: pointer;
+    }
     .editor-stage {
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -369,6 +378,7 @@
           <button type="button" class="action-btn tool-btn" data-tool="box">Box</button>
           <button type="button" class="action-btn tool-btn" data-tool="text">Text</button>
           <button type="button" class="action-btn tool-btn" data-tool="crop">Crop</button>
+          <input type="color" id="toolColor" class="color-picker" value="#f87171" aria-label="Tool color" />
           <button type="button" id="resetEditor" class="action-btn">Reset</button>
         </div>
 
@@ -402,16 +412,23 @@
     const copyEditedBtn = document.getElementById('copyEditedBtn');
     const downloadEditedBtn = document.getElementById('downloadEditedBtn');
     const resetEditor = document.getElementById('resetEditor');
+    const toolColor = document.getElementById('toolColor');
     const toolButtons = [...document.querySelectorAll('.tool-btn')];
     const toast      = document.getElementById('toast');
 
     const editorCtx = editorCanvas.getContext('2d');
+    const rasterCanvas = document.createElement('canvas');
+    const rasterCtx = rasterCanvas.getContext('2d');
     let selectedTool = 'draw';
+    let selectedColor = toolColor.value;
     let currentFile = null;
     let baseImage = null;
     let isPointerDown = false;
     let startPoint = null;
-    let snapshot = null;
+    let activeElementId = null;
+    let dragOffset = { x: 0, y: 0 };
+    let draftRect = null;
+    let annotations = [];
     let undoStack = [];
     let redoStack = [];
     const MAX_UNDO_STEPS = 30;
@@ -420,6 +437,9 @@
 
     toolButtons.forEach(btn => {
       btn.addEventListener('click', () => setTool(btn.dataset.tool));
+    });
+    toolColor.addEventListener('input', () => {
+      selectedColor = toolColor.value;
     });
     closeEditor.addEventListener('click', closeEditorModal);
     editorModal.addEventListener('click', ev => {
@@ -639,10 +659,17 @@
         currentFile = file;
         baseImage = img;
 
+        rasterCanvas.width = img.naturalWidth;
+        rasterCanvas.height = img.naturalHeight;
+        rasterCtx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+        rasterCtx.drawImage(img, 0, 0);
+
         editorCanvas.width = img.naturalWidth;
         editorCanvas.height = img.naturalHeight;
-        editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
-        editorCtx.drawImage(img, 0, 0);
+        annotations = [];
+        activeElementId = null;
+        draftRect = null;
+        renderEditor();
         undoStack = [];
         redoStack = [];
 
@@ -658,7 +685,8 @@
       editorModal.classList.remove('active');
       isPointerDown = false;
       startPoint = null;
-      snapshot = null;
+      activeElementId = null;
+      draftRect = null;
     }
 
     function setTool(tool) {
@@ -669,10 +697,16 @@
     function resetEditorCanvas() {
       if (!baseImage) return;
       pushUndoState();
+
+      rasterCanvas.width = baseImage.naturalWidth;
+      rasterCanvas.height = baseImage.naturalHeight;
+      rasterCtx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+      rasterCtx.drawImage(baseImage, 0, 0);
+
       editorCanvas.width = baseImage.naturalWidth;
       editorCanvas.height = baseImage.naturalHeight;
-      editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
-      editorCtx.drawImage(baseImage, 0, 0);
+      annotations = [];
+      renderEditor();
       showToast('success', 'Editor reset to original image.');
     }
 
@@ -691,77 +725,154 @@
       const pt = getCanvasPoint(ev);
 
       if (selectedTool === 'text') {
+        const hit = findAnnotationAt(pt);
+        if (hit && hit.type === 'text') {
+          pushUndoState();
+          isPointerDown = true;
+          activeElementId = hit.id;
+          dragOffset = { x: pt.x - hit.x, y: pt.y - hit.y };
+          editorCanvas.setPointerCapture(ev.pointerId);
+          return;
+        }
+
         const input = prompt('Text to place on image:');
         if (!input) return;
         pushUndoState();
-        editorCtx.font = `${Math.max(16, Math.round(editorCanvas.width * 0.03))}px Inter, sans-serif`;
-        editorCtx.fillStyle = getThemeColor('--text');
-        editorCtx.strokeStyle = 'rgba(15,15,19,.8)';
-        editorCtx.lineWidth = 3;
-        editorCtx.strokeText(input, pt.x, pt.y);
-        editorCtx.fillText(input, pt.x, pt.y);
+        const fontSize = Math.max(16, Math.round(editorCanvas.width * 0.03));
+        annotations.push({
+          id: crypto.randomUUID(),
+          type: 'text',
+          x: pt.x,
+          y: pt.y,
+          text: input,
+          fontSize,
+          color: selectedColor,
+        });
+        renderEditor();
         return;
+      }
+
+      if (selectedTool === 'box') {
+        const hit = findAnnotationAt(pt);
+        if (hit && hit.type === 'box') {
+          pushUndoState();
+          isPointerDown = true;
+          activeElementId = hit.id;
+          dragOffset = { x: pt.x - hit.x, y: pt.y - hit.y };
+          editorCanvas.setPointerCapture(ev.pointerId);
+          return;
+        }
       }
 
   pushUndoState();
       isPointerDown = true;
       startPoint = pt;
-      snapshot = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      draftRect = null;
 
       if (selectedTool === 'draw') {
-        editorCtx.beginPath();
-        editorCtx.moveTo(pt.x, pt.y);
+        rasterCtx.beginPath();
+        rasterCtx.moveTo(pt.x, pt.y);
       }
       editorCanvas.setPointerCapture(ev.pointerId);
     }
 
     function onCanvasPointerMove(ev) {
-      if (!isPointerDown || !startPoint) return;
+      if (!isPointerDown) return;
       const pt = getCanvasPoint(ev);
 
-      if (selectedTool === 'draw') {
-        editorCtx.strokeStyle = getThemeColor('--red');
-        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.005));
-        editorCtx.lineCap = 'round';
-        editorCtx.lineJoin = 'round';
-        editorCtx.lineTo(pt.x, pt.y);
-        editorCtx.stroke();
+      if (activeElementId) {
+        const item = annotations.find(a => a.id === activeElementId);
+        if (!item) return;
+
+        if (item.type === 'box') {
+          item.x = clamp(pt.x - dragOffset.x, 0, Math.max(0, editorCanvas.width - item.w));
+          item.y = clamp(pt.y - dragOffset.y, 0, Math.max(0, editorCanvas.height - item.h));
+        } else if (item.type === 'text') {
+          item.x = clamp(pt.x - dragOffset.x, 0, editorCanvas.width);
+          item.y = clamp(pt.y - dragOffset.y, 0, editorCanvas.height);
+        }
+        renderEditor();
         return;
       }
 
-      editorCtx.putImageData(snapshot, 0, 0);
+      if (!startPoint) return;
+
+      if (selectedTool === 'draw') {
+        rasterCtx.strokeStyle = selectedColor;
+        rasterCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.005));
+        rasterCtx.lineCap = 'round';
+        rasterCtx.lineJoin = 'round';
+        rasterCtx.lineTo(pt.x, pt.y);
+        rasterCtx.stroke();
+        renderEditor();
+        return;
+      }
 
       const rect = toRect(startPoint, pt);
       if (selectedTool === 'box') {
-        editorCtx.strokeStyle = getThemeColor('--green');
-        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
-        editorCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        draftRect = { type: 'box', ...rect, color: selectedColor };
+        renderEditor();
       } else if (selectedTool === 'highlight') {
-        editorCtx.fillStyle = 'rgba(108,99,255,.28)';
-        editorCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        draftRect = { type: 'highlight', ...rect, color: hexToRgba(selectedColor, 0.28) };
+        renderEditor();
       } else if (selectedTool === 'crop') {
-        editorCtx.strokeStyle = getThemeColor('--accent');
-        editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
-        editorCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        draftRect = { type: 'crop', ...rect, color: getThemeColor('--accent') };
+        renderEditor();
       }
     }
 
     function onCanvasPointerUp(ev) {
-      if (!isPointerDown || !startPoint) return;
+      if (!isPointerDown) return;
+
+      if (activeElementId) {
+        isPointerDown = false;
+        activeElementId = null;
+        if (editorCanvas.hasPointerCapture(ev.pointerId)) {
+          editorCanvas.releasePointerCapture(ev.pointerId);
+        }
+        return;
+      }
+
+      if (!startPoint) {
+        isPointerDown = false;
+        return;
+      }
+
       const pt = getCanvasPoint(ev);
+      const rect = toRect(startPoint, pt);
+
+      if (selectedTool === 'box') {
+        if (rect.w > 8 && rect.h > 8) {
+          annotations.push({
+            id: crypto.randomUUID(),
+            type: 'box',
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+            color: selectedColor,
+          });
+        }
+      }
+
+      if (selectedTool === 'highlight') {
+        if (rect.w > 8 && rect.h > 8) {
+          rasterCtx.fillStyle = hexToRgba(selectedColor, 0.28);
+          rasterCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        }
+      }
 
       if (selectedTool === 'crop') {
-        const rect = toRect(startPoint, pt);
         if (rect.w > 8 && rect.h > 8) {
           const source = document.createElement('canvas');
           source.width = editorCanvas.width;
           source.height = editorCanvas.height;
           source.getContext('2d').drawImage(editorCanvas, 0, 0);
 
-          editorCanvas.width = Math.round(rect.w);
-          editorCanvas.height = Math.round(rect.h);
-          editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
-          editorCtx.drawImage(
+          rasterCanvas.width = Math.round(rect.w);
+          rasterCanvas.height = Math.round(rect.h);
+          rasterCtx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+          rasterCtx.drawImage(
             source,
             rect.x,
             rect.y,
@@ -769,17 +880,21 @@
             rect.h,
             0,
             0,
-            editorCanvas.width,
-            editorCanvas.height
+            rasterCanvas.width,
+            rasterCanvas.height
           );
+          editorCanvas.width = rasterCanvas.width;
+          editorCanvas.height = rasterCanvas.height;
+          annotations = [];
         } else {
-          editorCtx.putImageData(snapshot, 0, 0);
+          // no-op
         }
       }
 
+      draftRect = null;
+      renderEditor();
       isPointerDown = false;
       startPoint = null;
-      snapshot = null;
       if (editorCanvas.hasPointerCapture(ev.pointerId)) {
         editorCanvas.releasePointerCapture(ev.pointerId);
       }
@@ -802,6 +917,90 @@
       });
     }
 
+    function renderEditor() {
+      if (!editorCanvas.width || !editorCanvas.height) return;
+      editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+      editorCtx.drawImage(rasterCanvas, 0, 0, editorCanvas.width, editorCanvas.height);
+
+      annotations.forEach(item => {
+        if (item.type === 'box') {
+          editorCtx.strokeStyle = item.color;
+          editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
+          editorCtx.strokeRect(item.x, item.y, item.w, item.h);
+        }
+        if (item.type === 'text') {
+          editorCtx.font = `${item.fontSize}px Inter, sans-serif`;
+          editorCtx.fillStyle = item.color;
+          editorCtx.strokeStyle = 'rgba(15,15,19,.8)';
+          editorCtx.lineWidth = 3;
+          editorCtx.strokeText(item.text, item.x, item.y);
+          editorCtx.fillText(item.text, item.x, item.y);
+        }
+      });
+
+      if (draftRect) {
+        if (draftRect.type === 'box') {
+          editorCtx.strokeStyle = draftRect.color;
+          editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
+          editorCtx.strokeRect(draftRect.x, draftRect.y, draftRect.w, draftRect.h);
+        }
+        if (draftRect.type === 'highlight') {
+          editorCtx.fillStyle = draftRect.color;
+          editorCtx.fillRect(draftRect.x, draftRect.y, draftRect.w, draftRect.h);
+        }
+        if (draftRect.type === 'crop') {
+          editorCtx.strokeStyle = draftRect.color;
+          editorCtx.lineWidth = Math.max(2, Math.round(editorCanvas.width * 0.004));
+          editorCtx.strokeRect(draftRect.x, draftRect.y, draftRect.w, draftRect.h);
+        }
+      }
+    }
+
+    function findAnnotationAt(pt) {
+      const pad = 8;
+      for (let i = annotations.length - 1; i >= 0; i--) {
+        const item = annotations[i];
+        if (item.type === 'box') {
+          if (
+            pt.x >= item.x - pad &&
+            pt.x <= item.x + item.w + pad &&
+            pt.y >= item.y - pad &&
+            pt.y <= item.y + item.h + pad
+          ) {
+            return item;
+          }
+        }
+        if (item.type === 'text') {
+          editorCtx.font = `${item.fontSize}px Inter, sans-serif`;
+          const width = editorCtx.measureText(item.text).width;
+          const top = item.y - item.fontSize;
+          if (
+            pt.x >= item.x - pad &&
+            pt.x <= item.x + width + pad &&
+            pt.y >= top - pad &&
+            pt.y <= item.y + pad
+          ) {
+            return item;
+          }
+        }
+      }
+      return null;
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function hexToRgba(hex, alpha) {
+      const clean = hex.replace('#', '');
+      const full = clean.length === 3 ? clean.split('').map(ch => ch + ch).join('') : clean;
+      const num = parseInt(full, 16);
+      const r = (num >> 16) & 255;
+      const g = (num >> 8) & 255;
+      const b = num & 255;
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
     function onEditorKeydown(ev) {
       if (!editorModal.classList.contains('active')) return;
       const key = ev.key.toLowerCase();
@@ -817,12 +1016,13 @@
     }
 
     function pushUndoState() {
-      if (!editorCanvas.width || !editorCanvas.height) return;
-      const imageData = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      if (!rasterCanvas.width || !rasterCanvas.height) return;
+      const rasterData = rasterCtx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height);
       undoStack.push({
-        width: editorCanvas.width,
-        height: editorCanvas.height,
-        imageData,
+        width: rasterCanvas.width,
+        height: rasterCanvas.height,
+        rasterData,
+        annotations: JSON.parse(JSON.stringify(annotations)),
       });
       if (undoStack.length > MAX_UNDO_STEPS) {
         undoStack.shift();
@@ -834,17 +1034,16 @@
       const lastState = undoStack.pop();
       if (!lastState) return;
       pushRedoState();
-      editorCanvas.width = lastState.width;
-      editorCanvas.height = lastState.height;
-      editorCtx.putImageData(lastState.imageData, 0, 0);
+      restoreEditorState(lastState);
     }
 
     function pushRedoState() {
-      const imageData = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      const rasterData = rasterCtx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height);
       redoStack.push({
-        width: editorCanvas.width,
-        height: editorCanvas.height,
-        imageData,
+        width: rasterCanvas.width,
+        height: rasterCanvas.height,
+        rasterData,
+        annotations: JSON.parse(JSON.stringify(annotations)),
       });
       if (redoStack.length > MAX_UNDO_STEPS) {
         redoStack.shift();
@@ -854,18 +1053,27 @@
     function redoEditor() {
       const nextState = redoStack.pop();
       if (!nextState) return;
-      const currentState = editorCtx.getImageData(0, 0, editorCanvas.width, editorCanvas.height);
+      const currentState = rasterCtx.getImageData(0, 0, rasterCanvas.width, rasterCanvas.height);
       undoStack.push({
-        width: editorCanvas.width,
-        height: editorCanvas.height,
-        imageData: currentState,
+        width: rasterCanvas.width,
+        height: rasterCanvas.height,
+        rasterData: currentState,
+        annotations: JSON.parse(JSON.stringify(annotations)),
       });
       if (undoStack.length > MAX_UNDO_STEPS) {
         undoStack.shift();
       }
-      editorCanvas.width = nextState.width;
-      editorCanvas.height = nextState.height;
-      editorCtx.putImageData(nextState.imageData, 0, 0);
+      restoreEditorState(nextState);
+    }
+
+    function restoreEditorState(state) {
+      rasterCanvas.width = state.width;
+      rasterCanvas.height = state.height;
+      rasterCtx.putImageData(state.rasterData, 0, 0);
+      editorCanvas.width = state.width;
+      editorCanvas.height = state.height;
+      annotations = JSON.parse(JSON.stringify(state.annotations || []));
+      renderEditor();
     }
 
     function getThemeColor(name) {

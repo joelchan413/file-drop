@@ -37,9 +37,25 @@ cd file-drop
 docker compose up -d --build
 ```
 
-The app is now running at **http://localhost:8000**.
+The app is now running at **https://localhost:8000**.
 
-To access it from your phone, open `http://<your-pc-ip>:8000` (both devices must be on the same network).
+To access it from your phone, open `https://<your-pc-ip>:8000` (both devices must be on the same network).
+
+### HTTPS (for clipboard image copy)
+
+The container now starts with HTTPS enabled and auto-generates a self-signed certificate on first run.
+
+- Local access: `https://localhost:8000`
+- LAN access: `https://<your-pc-ip>:8000`
+
+If you want the cert to include your LAN IP/hostname (recommended for fewer browser warnings), set `SSL_EXTRA_SANS` in `docker-compose.yml`, then recreate:
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+> Browsers may still show a one-time warning for self-signed certificates until you trust the cert on your device.
 
 ### Where Do My Photos Go?
 
